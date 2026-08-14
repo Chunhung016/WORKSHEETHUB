@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "worksheets": {
+      "title": "Worksheet",
+      "description": "Educational answer sheets and worksheets organized by Grade Class, Subject, QR Code, and PDF storage.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique worksheet identifier"
+        },
+        "qrCodeId": {
+          "type": "string",
+          "description": "Unique QR code matching string (e.g. BEE-MATH-01)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the worksheet"
+        },
+        "gradeClass": {
+          "type": "string",
+          "description": "Grade / Class level, e.g. STD 1 to STD 6"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject name"
+        },
+        "pdfUrl": {
+          "type": "string",
+          "description": "Direct PDF URL or cloud-stored document payload"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Original file name if uploaded"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["id", "qrCodeId", "title", "pdfUrl"]
+    },
+    "settings": {
+      "title": "Setting",
+      "description": "Global school settings such as mascot logo",
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": ["key"]
+    }
+  },
+  "firestore": {
+    "/worksheets/{worksheetId}": {
+      "schema": "worksheets",
+      "description": "Collection of all shared worksheets across teacher devices"
+    },
+    "/settings/{settingId}": {
+      "schema": "settings",
+      "description": "Global school branding and configuration"
+    }
+  }
+}

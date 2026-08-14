@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* Disable dragging and touch callouts globally for protected canvas */
+canvas {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+
+/* Anti-Print security rule: blanks out screen if browser print is invoked */
+@media print {
+  body {
+    display: none !important;
+  }
+}
