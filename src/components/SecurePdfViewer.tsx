@@ -69,6 +69,13 @@ export const SecurePdfViewer: React.FC<SecurePdfViewerProps> = ({
     setLoading(true);
     setIsIframeFallback(false);
 
+    // Instant handling for Google Drive links (bypasses CORS delay directly into clean embed view)
+    if (pdfUrl.includes('drive.google.com') || pdfUrl.includes('docs.google.com')) {
+      setIsIframeFallback(true);
+      setLoading(false);
+      return;
+    }
+
     const loadDocument = async () => {
       try {
         let loadingTask;
@@ -195,8 +202,8 @@ export const SecurePdfViewer: React.FC<SecurePdfViewerProps> = ({
 
   // Convert URLs for fallback viewer if needed
   let safeEmbedUrl = pdfUrl.trim();
-  if (safeEmbedUrl.includes('drive.google.com')) {
-    const match = safeEmbedUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (safeEmbedUrl.includes('drive.google.com') || safeEmbedUrl.includes('docs.google.com')) {
+    const match = safeEmbedUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) || safeEmbedUrl.match(/id=([a-zA-Z0-9_-]+)/);
     if (match && match[1]) {
       safeEmbedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
     }

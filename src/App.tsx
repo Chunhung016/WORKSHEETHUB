@@ -14,16 +14,16 @@ export default function App() {
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
   useEffect(() => {
-    // Initial fetch from cloud with offline fallback
+    // Initial fetch from local IndexedDB + cloud synchronization
     getWorksheetsFromStorage().then((loaded) => {
-      if (loaded && loaded.length > 0) {
+      if (Array.isArray(loaded)) {
         setWorksheets(loaded);
       }
     });
 
-    // Real-time listener: any device updating/adding/deleting a worksheet updates this device instantly!
+    // Real-time listener: any device updating/adding/deleting a worksheet updates this device
     const unsubscribeCloud = subscribeToWorksheets((cloudWorksheets) => {
-      if (cloudWorksheets && cloudWorksheets.length > 0) {
+      if (Array.isArray(cloudWorksheets)) {
         setWorksheets(cloudWorksheets);
       }
     });

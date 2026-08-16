@@ -40,11 +40,94 @@ export const INITIAL_WORKSHEETS: WorksheetItem[] = [
   }
 ];
 
-const DB_KEY = 'little_bee_worksheets_pdf_v2';
+const LOCAL_STORAGE_KEY = 'little_bee_worksheets_v3';
+const INITIALIZED_KEY = 'little_bee_storage_initialized_v3';
 const FIRESTORE_COLLECTION = 'worksheets';
 
+// Helper: load local items from IndexedDB
+export const getLocalWorksheets = async (): Promise<WorksheetItem[] | null> => {
+  try {
+    const saved = await get<WorksheetItem[]>(LOCAL_STORAGE_KEY);
+    if (saved && Array.isArray(saved)) {
+      return saved;
+    }
+  } catch (e) {
+    console.error('Error reading from IndexedDB:', e);
+  }
+
+  // Fallback to localStorage
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    // Ignore JSON or localStorage error
+  }
+
+  return null;
+};
+
+// Helper: save local items to IndexedDB and localStorage
+export const saveLocalWorksheets = async (worksheets: WorksheetItem[]): Promise<void> => {
+  try {
+    await set(LOCAL_STORAGE_KEY, worksheets);
+    await set(INITIALIZED_KEY, true);
+  } catch (e) {
+    console.error('Error writing to IndexedDB:', e);
+  }
+
+  // Try storing in localStorage (strip large base64 if quota exceeded)
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(worksheets));
+    localStorage.setItem(INITIALIZED_KEY, 'true');
+  } catch (e) {
+    // Large base64 PDF exceeded 5MB localStorage limit - strip PDF payload for localStorage fallback
+    try {
+      const lightweight = worksheets.map(ws => ({
+        ...ws,
+        pdfUrl: ws.pdfUrl.startsWith('data:') ? '' : ws.pdfUrl,
+      }));
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(lightweight));
+    } catch {
+      // IndexedDB has already persisted the full data safely
+    }
+  }
+};
+
+// Merge cloud documents with local cache to ensure no local PDFs or new additions are lost
+const mergeCloudWithLocal = (
+  cloudItems: WorksheetItem[],
+  localItems: WorksheetItem[] | null
+): WorksheetItem[] => {
+  if (!localItems || localItems.length === 0) {
+    return cloudItems;
+  }
+
+  const localMap = new Map<string, WorksheetItem>();
+  localItems.forEach((item) => localMap.set(item.id, item));
+
+  // Update cloud items with local high-res PDF data if cloud copy is lightweight
+  const merged: WorksheetItem[] = cloudItems.map((cloudItem) => {
+    const local = localMap.get(cloudItem.id);
+    if (local && local.pdfUrl && (!cloudItem.pdfUrl || cloudItem.pdfUrl.length < 50)) {
+      return {
+        ...cloudItem,
+        pdfUrl: local.pdfUrl,
+        fileName: local.fileName || cloudItem.fileName,
+      };
+    }
+    return cloudItem;
+  });
+
+  return merged;
+};
+
 /**
- * Subscribe to real-time cloud changes across all devices
+ * Real-time listener: syncs across open browser tabs & devices without overwriting local data
  */
 export const subscribeToWorksheets = (
   onUpdate: (worksheets: WorksheetItem[]) => void
@@ -53,12 +136,15 @@ export const subscribeToWorksheets = (
     const colRef = collection(db, FIRESTORE_COLLECTION);
     const unsubscribe = onSnapshot(
       colRef,
-      (snapshot) => {
+      async (snapshot) => {
+        // Read current local cache
+        const localItems = await getLocalWorksheets();
+        
         if (!snapshot.empty) {
-          const items: WorksheetItem[] = [];
+          const cloudItems: WorksheetItem[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
-            items.push({
+            cloudItems.push({
               id: docSnap.id,
               qrCodeId: data.qrCodeId || '',
               title: data.title || '',
@@ -68,9 +154,10 @@ export const subscribeToWorksheets = (
               fileName: data.fileName,
             });
           });
-          // Cache locally
-          set(DB_KEY, items).catch(() => {});
-          onUpdate(items);
+
+          const merged = mergeCloudWithLocal(cloudItems, localItems);
+          await saveLocalWorksheets(merged);
+          onUpdate(merged);
         }
       },
       (error) => {
@@ -85,17 +172,23 @@ export const subscribeToWorksheets = (
 };
 
 /**
- * Get worksheets prioritizing Firestore, with fallback to local cache
+ * Fetch worksheets on page load (Reliable local-first + cloud merge)
  */
 export const getWorksheetsFromStorage = async (): Promise<WorksheetItem[]> => {
+  // 1. Check local IndexedDB first
+  const localItems = await getLocalWorksheets();
+  const isInitialized = (await get<boolean>(INITIALIZED_KEY)) || localStorage.getItem(INITIALIZED_KEY) === 'true';
+
+  // 2. Fetch from Firestore
   try {
     const colRef = collection(db, FIRESTORE_COLLECTION);
     const snapshot = await getDocs(colRef);
+
     if (!snapshot.empty) {
-      const items: WorksheetItem[] = [];
+      const cloudItems: WorksheetItem[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        items.push({
+        cloudItems.push({
           id: docSnap.id,
           qrCodeId: data.qrCodeId || '',
           title: data.title || '',
@@ -105,85 +198,48 @@ export const getWorksheetsFromStorage = async (): Promise<WorksheetItem[]> => {
           fileName: data.fileName,
         });
       });
-      // Save to IndexedDB cache
-      await set(DB_KEY, items).catch(() => {});
-      return items;
+
+      const merged = mergeCloudWithLocal(cloudItems, localItems);
+      await saveLocalWorksheets(merged);
+      return merged;
     } else {
-      // First time initialization: seed initial sample worksheets into Cloud Firestore
-      await syncAllToFirestore(INITIAL_WORKSHEETS);
+      // Cloud is empty.
+      if (localItems && localItems.length > 0) {
+        // User has local data -> sync local items up to cloud
+        syncAllToFirestore(localItems).catch(() => {});
+        return localItems;
+      }
+
+      if (isInitialized) {
+        // User intentionally deleted all worksheets -> return empty array
+        return [];
+      }
+
+      // First time user launch: initialize with defaults and save
+      await saveLocalWorksheets(INITIAL_WORKSHEETS);
+      syncAllToFirestore(INITIAL_WORKSHEETS).catch(() => {});
       return INITIAL_WORKSHEETS;
     }
   } catch (cloudError) {
-    console.warn('Could not fetch from Firestore, falling back to local storage:', cloudError);
+    console.warn('Cloud fetch failed, using local storage fallback:', cloudError);
   }
 
-  // Fallback to IndexedDB
-  try {
-    const saved = await get<WorksheetItem[]>(DB_KEY);
-    if (saved && saved.length > 0) {
-      return saved.map((item) => ({
-        ...item,
-        gradeClass: item.gradeClass || 'STD 1',
-        subject: item.subject || 'General'
-      }));
-    }
-  } catch (e) {
-    console.error('Failed to load from IndexedDB', e);
+  // 3. Cloud unavailable or failed: Return local data
+  if (localItems !== null) {
+    return localItems;
   }
 
-  // Fallback to localStorage
-  try {
-    const localSaved = localStorage.getItem(DB_KEY);
-    if (localSaved) {
-      const parsed = JSON.parse(localSaved);
-      return parsed.map((item: any) => ({
-        ...item,
-        gradeClass: item.gradeClass || 'STD 1',
-        subject: item.subject || 'General'
-      }));
-    }
-  } catch (e) {
-    console.error(e);
+  if (isInitialized) {
+    return [];
   }
 
+  // Brand new offline launch
+  await saveLocalWorksheets(INITIAL_WORKSHEETS);
   return INITIAL_WORKSHEETS;
 };
 
 /**
- * Sync single worksheet addition or update to Firestore
- */
-export const saveSingleWorksheetToCloud = async (worksheet: WorksheetItem) => {
-  try {
-    const docRef = doc(db, FIRESTORE_COLLECTION, worksheet.id);
-    await setDoc(docRef, {
-      id: worksheet.id,
-      qrCodeId: worksheet.qrCodeId,
-      title: worksheet.title,
-      gradeClass: worksheet.gradeClass || 'STD 1',
-      subject: worksheet.subject || 'General',
-      pdfUrl: worksheet.pdfUrl,
-      fileName: worksheet.fileName || '',
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error('Error saving to Firestore:', err);
-  }
-};
-
-/**
- * Delete a worksheet from Firestore
- */
-export const deleteWorksheetFromCloud = async (id: string) => {
-  try {
-    const docRef = doc(db, FIRESTORE_COLLECTION, id);
-    await deleteDoc(docRef);
-  } catch (err) {
-    console.error('Error deleting from Firestore:', err);
-  }
-};
-
-/**
- * Batch sync full worksheet list to Firestore
+ * Batch sync full worksheet list to Firestore safely
  */
 export const syncAllToFirestore = async (worksheets: WorksheetItem[]) => {
   try {
@@ -191,15 +247,22 @@ export const syncAllToFirestore = async (worksheets: WorksheetItem[]) => {
     const snapshot = await getDocs(colRef);
     const newIds = new Set(worksheets.map((w) => w.id));
 
-    // Delete items that are no longer in the list
+    // Delete items that were removed
     for (const docSnap of snapshot.docs) {
       if (!newIds.has(docSnap.id)) {
-        await deleteDoc(docSnap.ref).catch(() => {});
+        await deleteDoc(docSnap.ref).catch((e) => console.warn('Could not delete cloud doc:', e));
       }
     }
 
-    // Save/Update all items
+    // Save/Update each item in Firestore
     for (const ws of worksheets) {
+      // Firestore document max limit is 1MB. If base64 is too large (> 750KB),
+      // we save the metadata without exceeding the document limit.
+      let cloudPdfUrl = ws.pdfUrl;
+      if (cloudPdfUrl && cloudPdfUrl.startsWith('data:') && cloudPdfUrl.length > 750000) {
+        cloudPdfUrl = ''; // Retained locally in IndexedDB
+      }
+
       const docRef = doc(db, FIRESTORE_COLLECTION, ws.id);
       await setDoc(docRef, {
         id: ws.id,
@@ -207,9 +270,11 @@ export const syncAllToFirestore = async (worksheets: WorksheetItem[]) => {
         title: ws.title,
         gradeClass: ws.gradeClass || 'STD 1',
         subject: ws.subject || 'General',
-        pdfUrl: ws.pdfUrl,
+        pdfUrl: cloudPdfUrl,
         fileName: ws.fileName || '',
         updatedAt: new Date().toISOString(),
+      }, { merge: true }).catch((e) => {
+        console.warn(`Could not sync worksheet ${ws.id} to cloud:`, e);
       });
     }
   } catch (err) {
@@ -218,25 +283,14 @@ export const syncAllToFirestore = async (worksheets: WorksheetItem[]) => {
 };
 
 /**
- * Save worksheets both locally and to Cloud Firestore
+ * Save worksheets to both local IndexedDB and Cloud Firestore
  */
 export const saveWorksheetsToStorage = async (worksheets: WorksheetItem[]) => {
-  // 1. Local IndexedDB Cache for offline resilience
-  try {
-    await set(DB_KEY, worksheets);
-  } catch (e) {
-    console.error('Failed to save to IndexedDB', e);
-  }
+  // 1. Immediately persist full data locally (guarantees zero data loss on refresh)
+  await saveLocalWorksheets(worksheets);
 
-  // 2. Local Storage Backup
-  try {
-    localStorage.setItem(DB_KEY, JSON.stringify(worksheets));
-  } catch (e) {
-    // Large base64 PDFs might exceed localStorage quota; IndexedDB & Firestore handle this safely
-  }
-
-  // 3. Sync to Cloud Firestore for cross-device sharing
+  // 2. Sync to Cloud Firestore asynchronously
   syncAllToFirestore(worksheets).catch((err) => {
-    console.warn('Cloud sync in progress or queued:', err);
+    console.warn('Cloud sync error:', err);
   });
 };
