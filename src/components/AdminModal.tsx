@@ -7,10 +7,8 @@ import {
   ExternalLink,
   CheckCircle2,
   Download,
-  ShieldAlert,
   GraduationCap,
   BookOpen,
-  Filter,
   ArrowUpDown,
   Search,
   Settings,
@@ -18,11 +16,11 @@ import {
   ArrowLeft,
   AlertTriangle,
   RotateCcw,
-  FileText,
-  LayoutGrid,
-  Check,
   Sparkles,
-  Eye
+  Layers,
+  ClipboardList,
+  Wand2,
+  Copy
 } from 'lucide-react';
 import { WorksheetItem, GradeClass } from '../types';
 import { INITIAL_WORKSHEETS } from '../data/worksheets';
@@ -35,6 +33,17 @@ interface AdminModalProps {
 }
 
 type AdminTab = 'hub' | 'create' | 'directory' | 'settings';
+
+interface BatchRowItem {
+  id: string;
+  qrCodeId: string;
+  title: string;
+  gradeClass: GradeClass;
+  subject: string;
+  pdfUrl: string;
+  fileName?: string;
+  fileData?: string;
+}
 
 const CLASS_OPTIONS: GradeClass[] = [
   'STD 1',
@@ -57,6 +66,8 @@ const COMMON_SUBJECTS = [
   'General',
 ];
 
+const MAX_BATCH_ITEMS = 10;
+
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
@@ -68,16 +79,55 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [passwordError, setPasswordError] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>('hub');
 
-  // Form states (Card 1: Create)
-  const [qrCodeId, setQrCodeId] = useState('');
-  const [title, setTitle] = useState('');
-  const [gradeClass, setGradeClass] = useState<GradeClass>('STD 1');
-  const [subject, setSubject] = useState('English');
-  const [customSubject, setCustomSubject] = useState('');
-  const [pdfSourceType, setPdfSourceType] = useState<'upload' | 'url'>('upload');
-  const [pdfUrl, setPdfUrl] = useState('');
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [uploadedPdfData, setUploadedPdfData] = useState<string | null>(null);
+  // Creation Mode: 'batch' (up to 10 at once) or 'single'
+  const [createMode, setCreateMode] = useState<'batch' | 'single'>('batch');
+
+  // Single Form states
+  const [singleQrCodeId, setSingleQrCodeId] = useState('');
+  const [singleTitle, setSingleTitle] = useState('');
+  const [singleGradeClass, setSingleGradeClass] = useState<GradeClass>('STD 1');
+  const [singleSubject, setSingleSubject] = useState('English');
+  const [singleCustomSubject, setSingleCustomSubject] = useState('');
+  const [singlePdfSourceType, setSinglePdfSourceType] = useState<'upload' | 'url'>('url');
+  const [singlePdfUrl, setSinglePdfUrl] = useState('');
+  const [singleSelectedFileName, setSingleSelectedFileName] = useState<string | null>(null);
+  const [singleUploadedPdfData, setSingleUploadedPdfData] = useState<string | null>(null);
+
+  // Batch Form states (Up to 10 items)
+  const [batchItems, setBatchItems] = useState<BatchRowItem[]>([
+    {
+      id: `row-1-${Date.now()}`,
+      qrCodeId: '',
+      title: '',
+      gradeClass: 'STD 1',
+      subject: 'English',
+      pdfUrl: '',
+    },
+    {
+      id: `row-2-${Date.now()}`,
+      qrCodeId: '',
+      title: '',
+      gradeClass: 'STD 1',
+      subject: 'English',
+      pdfUrl: '',
+    },
+    {
+      id: `row-3-${Date.now()}`,
+      qrCodeId: '',
+      title: '',
+      gradeClass: 'STD 1',
+      subject: 'English',
+      pdfUrl: '',
+    },
+  ]);
+
+  // Bulk Tools states
+  const [bulkClass, setBulkClass] = useState<GradeClass>('STD 1');
+  const [bulkSubject, setBulkSubject] = useState('English');
+  const [bulkQrPrefix, setBulkQrPrefix] = useState('BEE-');
+  const [isQuickPasteOpen, setIsQuickPasteOpen] = useState(false);
+  const [pastedLinksText, setPastedLinksText] = useState('');
+
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Filter, Sort & Search states (Card 2: Directory)
@@ -88,7 +138,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
   // Settings states (Card 3: Settings)
-  const [showTips, setShowTips] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(
     localStorage.getItem('little_bee_custom_logo')
   );
@@ -97,7 +146,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setFeedbackMessage({ text, type });
     setTimeout(() => {
       setFeedbackMessage(null);
-    }, 3500);
+    }, 4000);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -112,58 +161,38 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handlePdfFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
-        showNotification('Please upload a valid PDF file.', 'error');
-        return;
-      }
-      setSelectedFileName(file.name);
-      if (!title) {
-        setTitle(file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '));
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        setUploadedPdfData(result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleAddWorksheet = (e: React.FormEvent) => {
+  // --- Single Creation Handler ---
+  const handleAddSingleWorksheet = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!qrCodeId.trim() || !title.trim()) {
+    if (!singleQrCodeId.trim() || !singleTitle.trim()) {
       showNotification('Please enter QR code ID and title.', 'error');
       return;
     }
 
     let finalPdfUrl = '';
-    const fileName = selectedFileName || undefined;
+    const fileName = singleSelectedFileName || undefined;
 
-    if (pdfSourceType === 'upload') {
-      if (!uploadedPdfData) {
+    if (singlePdfSourceType === 'upload') {
+      if (!singleUploadedPdfData) {
         showNotification('Please choose a PDF file to upload.', 'error');
         return;
       }
-      finalPdfUrl = uploadedPdfData;
+      finalPdfUrl = singleUploadedPdfData;
     } else {
-      if (!pdfUrl.trim()) {
-        showNotification('Please provide a valid PDF link.', 'error');
+      if (!singlePdfUrl.trim()) {
+        showNotification('Please provide a valid PDF or Google Drive link.', 'error');
         return;
       }
-      finalPdfUrl = pdfUrl.trim();
+      finalPdfUrl = singlePdfUrl.trim();
     }
 
-    const finalSubject = subject === 'Other' ? (customSubject.trim() || 'General') : subject;
+    const finalSubject = singleSubject === 'Other' ? (singleCustomSubject.trim() || 'General') : singleSubject;
 
     const newWs: WorksheetItem = {
       id: `ws-${Date.now()}`,
-      qrCodeId: qrCodeId.trim().toUpperCase(),
-      title: title.trim(),
-      gradeClass,
+      qrCodeId: singleQrCodeId.trim().toUpperCase(),
+      title: singleTitle.trim(),
+      gradeClass: singleGradeClass,
       subject: finalSubject,
       pdfUrl: finalPdfUrl,
       fileName,
@@ -172,17 +201,224 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     const updated = [newWs, ...worksheets];
     onUpdateWorksheets(updated);
 
-    // Reset Form
-    setQrCodeId('');
-    setTitle('');
-    setPdfUrl('');
-    setSelectedFileName(null);
-    setUploadedPdfData(null);
-    setCustomSubject('');
-    showNotification(`Worksheet "${newWs.title}" (${gradeClass} • ${finalSubject}) created successfully!`);
+    // Reset single form
+    setSingleQrCodeId('');
+    setSingleTitle('');
+    setSinglePdfUrl('');
+    setSingleSelectedFileName(null);
+    setSingleUploadedPdfData(null);
+    setSingleCustomSubject('');
+    showNotification(`Worksheet "${newWs.title}" created successfully!`);
   };
 
-  // Safe inline delete without native window.confirm (works seamlessly in all iframes)
+  // --- Batch Creation Helpers & Handlers ---
+  const handleAddBatchRow = () => {
+    if (batchItems.length >= MAX_BATCH_ITEMS) {
+      showNotification(`Maximum limit of ${MAX_BATCH_ITEMS} worksheets at a time reached.`, 'error');
+      return;
+    }
+    const nextNum = batchItems.length + 1;
+    const padded = nextNum < 10 ? `0${nextNum}` : `${nextNum}`;
+    setBatchItems([
+      ...batchItems,
+      {
+        id: `row-${Date.now()}-${Math.random()}`,
+        qrCodeId: bulkQrPrefix ? `${bulkQrPrefix.toUpperCase()}${padded}` : '',
+        title: '',
+        gradeClass: bulkClass,
+        subject: bulkSubject,
+        pdfUrl: '',
+      },
+    ]);
+  };
+
+  const handleRemoveBatchRow = (id: string) => {
+    if (batchItems.length <= 1) {
+      // Clear instead of removing last row
+      setBatchItems([
+        {
+          id: `row-${Date.now()}`,
+          qrCodeId: '',
+          title: '',
+          gradeClass: bulkClass,
+          subject: bulkSubject,
+          pdfUrl: '',
+        },
+      ]);
+      return;
+    }
+    setBatchItems(batchItems.filter((item) => item.id !== id));
+  };
+
+  const handleUpdateBatchRow = (id: string, field: keyof BatchRowItem, value: any) => {
+    setBatchItems(
+      batchItems.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const handleApplyBulkClassSubject = () => {
+    setBatchItems(
+      batchItems.map((item) => ({
+        ...item,
+        gradeClass: bulkClass,
+        subject: bulkSubject,
+      }))
+    );
+    showNotification(`Applied ${bulkClass} & ${bulkSubject} to all ${batchItems.length} rows!`);
+  };
+
+  const handleAutoNumberQRs = () => {
+    const prefix = (bulkQrPrefix.trim() || 'BEE-').toUpperCase();
+    setBatchItems(
+      batchItems.map((item, index) => {
+        const num = index + 1;
+        const padded = num < 10 ? `0${num}` : `${num}`;
+        return {
+          ...item,
+          qrCodeId: `${prefix}${padded}`,
+        };
+      })
+    );
+    showNotification(`Auto-generated QR codes from ${prefix}01 to ${prefix}${batchItems.length < 10 ? '0' + batchItems.length : batchItems.length}`);
+  };
+
+  // Quick Paste: parse up to 10 URLs pasted by user
+  const handleProcessPastedLinks = () => {
+    if (!pastedLinksText.trim()) {
+      showNotification('Please paste at least one PDF or Google Drive link.', 'error');
+      return;
+    }
+
+    const lines = pastedLinksText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && (l.startsWith('http') || l.startsWith('data:') || l.includes('drive.google')));
+
+    if (lines.length === 0) {
+      showNotification('No valid web or Google Drive links found in pasted text.', 'error');
+      return;
+    }
+
+    const limitedLines = lines.slice(0, MAX_BATCH_ITEMS);
+    const prefix = (bulkQrPrefix.trim() || 'BEE-').toUpperCase();
+
+    const newBatchRows: BatchRowItem[] = limitedLines.map((link, index) => {
+      const num = index + 1;
+      const padded = num < 10 ? `0${num}` : `${num}`;
+      
+      // Attempt to extract title from URL if possible
+      let extractedTitle = `Worksheet Answer Key ${padded}`;
+      try {
+        if (link.endsWith('.pdf')) {
+          const parts = link.split('/');
+          const lastPart = parts[parts.length - 1].replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+          if (lastPart) extractedTitle = decodeURIComponent(lastPart);
+        }
+      } catch {}
+
+      return {
+        id: `row-paste-${Date.now()}-${index}`,
+        qrCodeId: `${prefix}${padded}`,
+        title: extractedTitle,
+        gradeClass: bulkClass,
+        subject: bulkSubject,
+        pdfUrl: link,
+      };
+    });
+
+    setBatchItems(newBatchRows);
+    setIsQuickPasteOpen(false);
+    setPastedLinksText('');
+    showNotification(`Loaded ${newBatchRows.length} worksheet links into rows!`);
+  };
+
+  // Multi-PDF file upload (up to 10 files)
+  const handleMultiFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileList: File[] = (Array.from(files) as File[]).slice(0, MAX_BATCH_ITEMS);
+    const prefix = (bulkQrPrefix.trim() || 'BEE-').toUpperCase();
+
+    const newRows: BatchRowItem[] = [];
+    let loadedCount = 0;
+
+    fileList.forEach((file: File, index: number) => {
+      if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+        return;
+      }
+
+      const num = index + 1;
+      const padded = num < 10 ? `0${num}` : `${num}`;
+      const cleanTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ');
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const fileData = reader.result as string;
+        newRows.push({
+          id: `file-${Date.now()}-${index}`,
+          qrCodeId: `${prefix}${padded}`,
+          title: cleanTitle,
+          gradeClass: bulkClass,
+          subject: bulkSubject,
+          pdfUrl: fileData,
+          fileName: file.name,
+          fileData,
+        });
+
+        loadedCount++;
+        if (loadedCount === fileList.length) {
+          setBatchItems(newRows);
+          showNotification(`Loaded ${newRows.length} PDF files ready to save!`);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Batch Save all valid rows
+  const handleSaveAllBatch = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Filter out rows that have link/file and QR code and Title
+    const validRows = batchItems.filter(
+      (item) => item.qrCodeId.trim() && item.title.trim() && item.pdfUrl.trim()
+    );
+
+    if (validRows.length === 0) {
+      showNotification('Please fill in QR Code ID, Title, and PDF Link/File for at least 1 row.', 'error');
+      return;
+    }
+
+    const newWorksheets: WorksheetItem[] = validRows.map((row, idx) => ({
+      id: `ws-${Date.now()}-${idx}`,
+      qrCodeId: row.qrCodeId.trim().toUpperCase(),
+      title: row.title.trim(),
+      gradeClass: row.gradeClass,
+      subject: row.subject,
+      pdfUrl: row.pdfUrl.trim(),
+      fileName: row.fileName,
+    }));
+
+    const updated = [...newWorksheets, ...worksheets];
+    onUpdateWorksheets(updated);
+
+    showNotification(`Successfully saved ${newWorksheets.length} new worksheets!`);
+
+    // Reset batch rows
+    setBatchItems([
+      {
+        id: `row-1-${Date.now()}`,
+        qrCodeId: '',
+        title: '',
+        gradeClass: bulkClass,
+        subject: bulkSubject,
+        pdfUrl: '',
+      },
+    ]);
+  };
+
+  // Safe inline delete
   const confirmDelete = (id: string) => {
     const updated = worksheets.filter((w) => w.id !== id);
     onUpdateWorksheets(updated);
@@ -256,28 +492,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     showNotification('Logo restored to default Little Bee mascot.');
   };
 
-  // Distinct subjects in dataset for filter dropdown
-  const uniqueSubjects = useMemo(() => {
-    const set = new Set<string>();
-    worksheets.forEach((w) => {
-      if (w.subject) set.add(w.subject);
-    });
-    return Array.from(set).sort();
-  }, [worksheets]);
-
   // Filtered & Sorted Worksheets
   const filteredWorksheets = useMemo(() => {
     return worksheets
       .filter((w) => {
-        // Filter by Class
-        if (filterClass !== 'ALL' && (w.gradeClass || 'STD 1') !== filterClass) {
-          return false;
-        }
-        // Filter by Subject
-        if (filterSubject !== 'ALL' && (w.subject || 'General') !== filterSubject) {
-          return false;
-        }
-        // Search query (matches QR code ID, Title, or Subject)
+        if (filterClass !== 'ALL' && (w.gradeClass || 'STD 1') !== filterClass) return false;
+        if (filterSubject !== 'ALL' && (w.subject || 'General') !== filterSubject) return false;
         if (searchQuery.trim()) {
           const query = searchQuery.toLowerCase().trim();
           const matchTitle = w.title.toLowerCase().includes(query);
@@ -288,27 +508,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         return true;
       })
       .sort((a, b) => {
-        if (sortBy === 'class') {
-          return (a.gradeClass || '').localeCompare(b.gradeClass || '');
-        }
-        if (sortBy === 'subject') {
-          return (a.subject || '').localeCompare(b.subject || '');
-        }
-        if (sortBy === 'title') {
-          return a.title.localeCompare(b.title);
-        }
-        if (sortBy === 'qr') {
-          return a.qrCodeId.localeCompare(b.qrCodeId);
-        }
-        return 0; // 'newest'
+        if (sortBy === 'class') return (a.gradeClass || '').localeCompare(b.gradeClass || '');
+        if (sortBy === 'subject') return (a.subject || '').localeCompare(b.subject || '');
+        if (sortBy === 'title') return a.title.localeCompare(b.title);
+        if (sortBy === 'qr') return a.qrCodeId.localeCompare(b.qrCodeId);
+        return 0;
       });
   }, [worksheets, filterClass, filterSubject, sortBy, searchQuery]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border-4 border-amber-300 relative max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50 animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl border-4 border-amber-300 relative max-h-[94vh] flex flex-col overflow-hidden">
         {/* Top Header Bar */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-amber-100 flex-shrink-0">
           <div className="flex items-center space-x-2.5">
@@ -336,7 +548,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </h2>
               <p className="text-[11px] text-amber-900/60 font-semibold">
                 {activeTab === 'hub' && 'Management Hub & Quick Navigation'}
-                {activeTab === 'create' && 'Card 1: Create & Link Worksheet'}
+                {activeTab === 'create' && 'Card 1: Batch Create & Link Worksheets (Up to 10)'}
                 {activeTab === 'directory' && 'Card 2: Worksheet Directory & Search'}
                 {activeTab === 'settings' && 'Card 3: System Settings & Backup'}
               </p>
@@ -416,7 +628,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             /* ========================================================== */
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-1 gap-3.5">
-                {/* CARD 1: CREATE NEW WORKSHEET */}
+                {/* CARD 1: CREATE NEW WORKSHEETS */}
                 <div
                   onClick={() => setActiveTab('create')}
                   className="group bg-gradient-to-br from-amber-50 via-yellow-50/70 to-amber-100/50 hover:from-amber-100 hover:to-yellow-100 p-4 sm:p-5 rounded-2xl border-2 border-amber-300 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-center justify-between"
@@ -431,11 +643,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           Card 1
                         </span>
                         <h3 className="text-sm sm:text-base font-black text-amber-950">
-                          Create New Worksheet
+                          Create & Link Worksheets (Up to 10 at once)
                         </h3>
                       </div>
                       <p className="text-xs text-amber-900/70 font-medium mt-0.5">
-                        Upload answer PDF, specify Class (STD 1–6), Subject & QR Code ID
+                        Add up to 10 Google Drive links or PDF files in one batch with auto QR numbering
                       </p>
                     </div>
                   </div>
@@ -506,188 +718,556 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
           ) : activeTab === 'create' ? (
             /* ========================================================== */
-            /*  VIEW 1: CREATE NEW WORKSHEET FORM                         */
+            /*  VIEW 1: CREATE WORKSHEETS (MULTI-ADD UP TO 10 / SINGLE)  */
             /* ========================================================== */
             <div className="space-y-4 py-1">
-              <div className="flex items-center justify-between bg-amber-100/80 p-3 rounded-2xl border border-amber-300">
+              {/* Header Navigation & Mode Selector */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-amber-100/80 p-3 rounded-2xl border border-amber-300">
                 <div className="flex items-center space-x-2">
                   <FolderPlus className="w-5 h-5 text-amber-700" />
                   <span className="text-xs font-black text-amber-950 uppercase tracking-wide">
-                    Create & Link New Worksheet
+                    Create & Link Worksheets
+                  </span>
+                  <span className="text-[10px] bg-amber-400 text-amber-950 px-2 py-0.5 rounded-full font-black">
+                    Max 10 per batch
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('directory')}
-                  className="text-xs font-bold text-amber-900 hover:text-amber-950 underline cursor-pointer"
-                >
-                  View Directory ({worksheets.length}) →
-                </button>
+
+                <div className="flex items-center space-x-2">
+                  <div className="flex bg-white rounded-xl p-0.5 border border-amber-300">
+                    <button
+                      type="button"
+                      onClick={() => setCreateMode('batch')}
+                      className={`px-3 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center space-x-1 ${
+                        createMode === 'batch'
+                          ? 'bg-amber-400 text-amber-950 shadow-sm'
+                          : 'text-gray-600 hover:text-amber-950'
+                      }`}
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>Multi-Add (Up to 10)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCreateMode('single')}
+                      className={`px-3 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer ${
+                        createMode === 'single'
+                          ? 'bg-amber-400 text-amber-950 shadow-sm'
+                          : 'text-gray-600 hover:text-amber-950'
+                      }`}
+                    >
+                      Single Entry
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('directory')}
+                    className="text-xs font-bold text-amber-900 hover:text-amber-950 underline cursor-pointer"
+                  >
+                    Directory ({worksheets.length}) →
+                  </button>
+                </div>
               </div>
 
-              <form onSubmit={handleAddWorksheet} className="space-y-3.5">
-                {/* Row 1: QR Code ID & Title */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-900 mb-1">
-                      QR Code ID (e.g. BEE-ABC-01) *
-                    </label>
-                    <input
-                      type="text"
-                      value={qrCodeId}
-                      onChange={(e) => setQrCodeId(e.target.value)}
-                      placeholder="e.g. BEE-MATH-01"
-                      className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 placeholder-amber-900/30"
-                      required
-                    />
+              {createMode === 'batch' ? (
+                /* ========================================================== */
+                /*  BATCH BUILDER VIEW (UP TO 10 WORKSHEET LINKS / FILES)     */
+                /* ========================================================== */
+                <form onSubmit={handleSaveAllBatch} className="space-y-3.5">
+                  {/* Bulk Helpers Bar (Apply to all rows) */}
+                  <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-1.5 text-xs font-black text-amber-950">
+                        <Wand2 className="w-4 h-4 text-amber-700" />
+                        <span>Batch Fast-Fill Tools</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {/* Quick Paste Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsQuickPasteOpen(true)}
+                          className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-[11px] font-black flex items-center space-x-1 cursor-pointer shadow-sm transition-colors"
+                        >
+                          <ClipboardList className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Paste Multiple Links</span>
+                        </button>
+
+                        {/* Multi-File Upload Button */}
+                        <label
+                          htmlFor="batch-multi-pdf-input"
+                          className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-[11px] font-black flex items-center space-x-1 cursor-pointer shadow-sm transition-colors"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Choose Multiple PDFs</span>
+                        </label>
+                        <input
+                          id="batch-multi-pdf-input"
+                          type="file"
+                          multiple
+                          accept="application/pdf"
+                          onChange={handleMultiFileUpload}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 border-t border-amber-200/60">
+                      {/* Set Default Class */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 mb-0.5">
+                          Default Class:
+                        </label>
+                        <select
+                          value={bulkClass}
+                          onChange={(e) => setBulkClass(e.target.value as GradeClass)}
+                          className="w-full bg-white border border-amber-300 rounded-xl px-2 py-1 text-xs font-black text-amber-950 focus:outline-none"
+                        >
+                          {CLASS_OPTIONS.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Set Default Subject */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 mb-0.5">
+                          Default Subject:
+                        </label>
+                        <select
+                          value={bulkSubject}
+                          onChange={(e) => setBulkSubject(e.target.value)}
+                          className="w-full bg-white border border-amber-300 rounded-xl px-2 py-1 text-xs font-bold text-amber-950 focus:outline-none"
+                        >
+                          {COMMON_SUBJECTS.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* QR Prefix for Auto-Numbering */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-amber-900 mb-0.5">
+                          QR Code Prefix:
+                        </label>
+                        <input
+                          type="text"
+                          value={bulkQrPrefix}
+                          onChange={(e) => setBulkQrPrefix(e.target.value.toUpperCase())}
+                          placeholder="e.g. BEE-MATH-"
+                          className="w-full bg-white border border-amber-300 rounded-xl px-2 py-1 text-xs font-black text-amber-950 focus:outline-none uppercase"
+                        />
+                      </div>
+
+                      {/* Apply Actions */}
+                      <div className="flex items-end space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={handleApplyBulkClassSubject}
+                          className="flex-1 py-1.5 px-2 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold text-[10px] rounded-xl transition-colors cursor-pointer text-center"
+                          title="Apply selected Class & Subject to all rows below"
+                        >
+                          Apply Class/Subject
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAutoNumberQRs}
+                          className="flex-1 py-1.5 px-2 bg-amber-400 hover:bg-amber-500 text-amber-950 font-black text-[10px] rounded-xl transition-colors cursor-pointer text-center"
+                          title="Fill sequential QR codes (01, 02, ...)"
+                        >
+                          Auto-Number QRs
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-900 mb-1">
-                      Worksheet Title / Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g. Addition & Subtraction Answers"
-                      className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 placeholder-amber-900/30"
-                      required
-                    />
-                  </div>
-                </div>
+                  {/* Batch Link Rows Table */}
+                  <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+                    <div className="flex items-center justify-between text-xs text-amber-900 font-bold px-1">
+                      <span>
+                        Worksheet Batch Rows ({batchItems.length}/{MAX_BATCH_ITEMS})
+                      </span>
+                      <span className="text-[11px] text-amber-900/70 font-semibold">
+                        Enter QR Code ID, Title, Class, Subject & Google Drive / PDF Link
+                      </span>
+                    </div>
 
-                {/* Row 2: Class Dropdown & Subject */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-900 mb-1 flex items-center space-x-1">
-                      <GraduationCap className="w-3.5 h-3.5 text-amber-700" />
-                      <span>Class / Grade Level</span>
-                    </label>
-                    <select
-                      value={gradeClass}
-                      onChange={(e) => setGradeClass(e.target.value as GradeClass)}
-                      className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-black focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 cursor-pointer"
+                    {batchItems.map((row, index) => (
+                      <div
+                        key={row.id}
+                        className="bg-white p-2.5 sm:p-3 rounded-2xl border-2 border-amber-200 hover:border-amber-400 transition-all shadow-sm space-y-2 relative"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="w-6 h-6 rounded-full bg-amber-400 text-amber-950 font-black text-xs flex items-center justify-center flex-shrink-0 shadow-sm">
+                            {index + 1}
+                          </span>
+
+                          {/* QR Code ID */}
+                          <div className="w-28 sm:w-36 flex-shrink-0">
+                            <input
+                              type="text"
+                              value={row.qrCodeId}
+                              onChange={(e) =>
+                                handleUpdateBatchRow(row.id, 'qrCodeId', e.target.value.toUpperCase())
+                              }
+                              placeholder="QR ID (e.g. BEE-01)"
+                              className="w-full bg-amber-50/50 border border-amber-300 rounded-xl px-2 py-1 text-xs font-black text-amber-950 uppercase focus:outline-none focus:ring-1 focus:ring-amber-400"
+                              required
+                            />
+                          </div>
+
+                          {/* Worksheet Title */}
+                          <div className="flex-1 min-w-0">
+                            <input
+                              type="text"
+                              value={row.title}
+                              onChange={(e) =>
+                                handleUpdateBatchRow(row.id, 'title', e.target.value)
+                              }
+                              placeholder="Worksheet Title (e.g. Chapter 1 Answer Key)"
+                              className="w-full bg-white border border-amber-300 rounded-xl px-2.5 py-1 text-xs font-bold text-amber-950 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                              required
+                            />
+                          </div>
+
+                          {/* Class Select */}
+                          <div className="w-24 sm:w-28 flex-shrink-0">
+                            <select
+                              value={row.gradeClass}
+                              onChange={(e) =>
+                                handleUpdateBatchRow(row.id, 'gradeClass', e.target.value as GradeClass)
+                              }
+                              className="w-full bg-white border border-amber-300 rounded-xl px-1.5 py-1 text-[11px] font-black text-amber-950 focus:outline-none cursor-pointer"
+                            >
+                              {CLASS_OPTIONS.map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Subject Select */}
+                          <div className="w-28 sm:w-32 flex-shrink-0">
+                            <select
+                              value={row.subject}
+                              onChange={(e) =>
+                                handleUpdateBatchRow(row.id, 'subject', e.target.value)
+                              }
+                              className="w-full bg-white border border-amber-300 rounded-xl px-1.5 py-1 text-[11px] font-bold text-amber-950 focus:outline-none cursor-pointer"
+                            >
+                              {COMMON_SUBJECTS.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Remove Row Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveBatchRow(row.id)}
+                            className="text-gray-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 cursor-pointer flex-shrink-0 transition-colors"
+                            title="Remove row"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* PDF Link input */}
+                        <div>
+                          <input
+                            type="text"
+                            value={row.pdfUrl}
+                            onChange={(e) =>
+                              handleUpdateBatchRow(row.id, 'pdfUrl', e.target.value)
+                            }
+                            placeholder="Google Drive link (https://drive.google.com/file/d/...) or Web PDF link"
+                            className="w-full bg-white border border-amber-200 rounded-xl px-2.5 py-1 text-xs text-amber-950 focus:outline-none focus:ring-1 focus:ring-amber-400 placeholder-amber-900/30 font-medium"
+                            required
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Row & Save Actions */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-amber-200">
+                    <button
+                      type="button"
+                      onClick={handleAddBatchRow}
+                      disabled={batchItems.length >= MAX_BATCH_ITEMS}
+                      className={`py-2 px-4 rounded-xl text-xs font-black flex items-center space-x-1.5 cursor-pointer border ${
+                        batchItems.length >= MAX_BATCH_ITEMS
+                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                          : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300 active:scale-95'
+                      }`}
                     >
-                      {CLASS_OPTIONS.map((cls) => (
-                        <option key={cls} value={cls}>
-                          {cls}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Add Another Row ({batchItems.length}/{MAX_BATCH_ITEMS})</span>
+                    </button>
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-amber-900 mb-1 flex items-center space-x-1">
-                      <BookOpen className="w-3.5 h-3.5 text-amber-700" />
-                      <span>Subject</span>
-                    </label>
-                    <select
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 cursor-pointer"
-                    >
-                      {COMMON_SUBJECTS.map((sub) => (
-                        <option key={sub} value={sub}>
-                          {sub}
-                        </option>
-                      ))}
-                      <option value="Other">Custom Subject...</option>
-                    </select>
-                    {subject === 'Other' && (
+                    <div className="flex items-center space-x-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBatchItems([
+                            {
+                              id: `row-1-${Date.now()}`,
+                              qrCodeId: '',
+                              title: '',
+                              gradeClass: bulkClass,
+                              subject: bulkSubject,
+                              pdfUrl: '',
+                            },
+                          ])
+                        }
+                        className="py-2.5 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl cursor-pointer"
+                      >
+                        Clear Rows
+                      </button>
+
+                      <button
+                        type="submit"
+                        className="flex-1 sm:flex-initial py-2.5 px-6 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-500 hover:to-yellow-500 text-amber-950 font-black text-xs rounded-xl border-2 border-white shadow-md transition-all cursor-pointer active:scale-95 flex items-center justify-center space-x-1.5"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-950" />
+                        <span>Save All ({batchItems.filter((i) => i.qrCodeId && i.title && i.pdfUrl).length}) Worksheets</span>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                /* ========================================================== */
+                /*  SINGLE ENTRY VIEW (CLASSIC 1-AT-A-TIME)                   */
+                /* ========================================================== */
+                <form onSubmit={handleAddSingleWorksheet} className="space-y-3.5">
+                  {/* Row 1: QR Code ID & Title */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-900 mb-1">
+                        QR Code ID (e.g. BEE-ABC-01) *
+                      </label>
                       <input
                         type="text"
-                        value={customSubject}
-                        onChange={(e) => setCustomSubject(e.target.value)}
-                        placeholder="Type custom subject name..."
-                        className="mt-1.5 w-full rounded-xl border-2 border-amber-300 px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950"
+                        value={singleQrCodeId}
+                        onChange={(e) => setSingleQrCodeId(e.target.value)}
+                        placeholder="e.g. BEE-MATH-01"
+                        className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-bold uppercase focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 placeholder-amber-900/30"
                         required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-900 mb-1">
+                        Worksheet Title / Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={singleTitle}
+                        onChange={(e) => setSingleTitle(e.target.value)}
+                        placeholder="e.g. Addition & Subtraction Answers"
+                        className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 placeholder-amber-900/30"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: Class Dropdown & Subject */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-900 mb-1 flex items-center space-x-1">
+                        <GraduationCap className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Class / Grade Level</span>
+                      </label>
+                      <select
+                        value={singleGradeClass}
+                        onChange={(e) => setSingleGradeClass(e.target.value as GradeClass)}
+                        className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-black focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 cursor-pointer"
+                      >
+                        {CLASS_OPTIONS.map((cls) => (
+                          <option key={cls} value={cls}>
+                            {cls}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-900 mb-1 flex items-center space-x-1">
+                        <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Subject</span>
+                      </label>
+                      <select
+                        value={singleSubject}
+                        onChange={(e) => setSingleSubject(e.target.value)}
+                        className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950 cursor-pointer"
+                      >
+                        {COMMON_SUBJECTS.map((sub) => (
+                          <option key={sub} value={sub}>
+                            {sub}
+                          </option>
+                        ))}
+                        <option value="Other">Custom Subject...</option>
+                      </select>
+                      {singleSubject === 'Other' && (
+                        <input
+                          type="text"
+                          value={singleCustomSubject}
+                          onChange={(e) => setSingleCustomSubject(e.target.value)}
+                          placeholder="Type custom subject name..."
+                          className="mt-1.5 w-full rounded-xl border-2 border-amber-300 px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white text-amber-950"
+                          required
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* PDF Source Choice Toggle */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-900 mb-1.5">
+                      Answer PDF Document Source *
+                    </label>
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setSinglePdfSourceType('url')}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl border-2 transition-all cursor-pointer ${
+                          singlePdfSourceType === 'url'
+                            ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm font-black'
+                            : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50'
+                        }`}
+                      >
+                        🔗 Google Drive / Web PDF Link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSinglePdfSourceType('upload')}
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl border-2 transition-all cursor-pointer ${
+                          singlePdfSourceType === 'upload'
+                            ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm font-black'
+                            : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50'
+                        }`}
+                      >
+                        📁 Upload Single File
+                      </button>
+                    </div>
+
+                    {singlePdfSourceType === 'upload' ? (
+                      <div className="border-2 border-dashed border-amber-300 rounded-2xl p-4 bg-amber-50/50 text-center hover:bg-amber-50 transition-colors">
+                        <input
+                          type="file"
+                          id="single-create-pdf-file-input"
+                          accept="application/pdf"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setSingleSelectedFileName(file.name);
+                              if (!singleTitle) setSingleTitle(file.name.replace(/\.pdf$/i, '').replace(/_/g, ' '));
+                              const reader = new FileReader();
+                              reader.onload = () => setSingleUploadedPdfData(reader.result as string);
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="single-create-pdf-file-input"
+                          className="cursor-pointer flex flex-col items-center justify-center space-y-1.5"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-amber-200 flex items-center justify-center text-amber-800">
+                            <Upload className="w-5 h-5" />
+                          </div>
+                          <span className="text-xs font-black text-amber-950">
+                            {singleSelectedFileName ? singleSelectedFileName : 'Click to choose PDF answer sheet'}
+                          </span>
+                        </label>
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value={singlePdfUrl}
+                        onChange={(e) => setSinglePdfUrl(e.target.value)}
+                        placeholder="https://drive.google.com/file/d/... or web PDF link"
+                        className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                       />
                     )}
                   </div>
-                </div>
 
-                {/* PDF Source Choice Toggle */}
-                <div>
-                  <label className="block text-[11px] font-bold text-amber-900 mb-1.5">
-                    Answer PDF Document Source *
-                  </label>
-                  <div className="flex gap-2 mb-2">
+                  <div className="pt-2 flex gap-2">
                     <button
-                      type="button"
-                      onClick={() => setPdfSourceType('upload')}
-                      className={`flex-1 py-2 text-xs font-bold rounded-xl border-2 transition-all cursor-pointer ${
-                        pdfSourceType === 'upload'
-                          ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm font-black'
-                          : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50'
-                      }`}
+                      type="submit"
+                      className="flex-1 py-3 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-500 hover:to-yellow-500 text-amber-950 font-black text-xs rounded-2xl border-2 border-white shadow-md transition-all cursor-pointer active:scale-95"
                     >
-                      📁 Upload PDF File
+                      Save & Create Single Worksheet
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPdfSourceType('url')}
-                      className={`flex-1 py-2 text-xs font-bold rounded-xl border-2 transition-all cursor-pointer ${
-                        pdfSourceType === 'url'
-                          ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-sm font-black'
-                          : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50'
-                      }`}
+                      onClick={() => setActiveTab('hub')}
+                      className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-2xl cursor-pointer"
                     >
-                      🔗 PDF URL / Drive Link
+                      Cancel
                     </button>
                   </div>
+                </form>
+              )}
 
-                  {pdfSourceType === 'upload' ? (
-                    <div className="border-2 border-dashed border-amber-300 rounded-2xl p-4 bg-amber-50/50 text-center hover:bg-amber-50 transition-colors">
-                      <input
-                        type="file"
-                        id="create-pdf-file-input"
-                        accept="application/pdf"
-                        onChange={handlePdfFileUpload}
-                        className="hidden"
-                      />
-                      <label
-                        htmlFor="create-pdf-file-input"
-                        className="cursor-pointer flex flex-col items-center justify-center space-y-1.5"
+              {/* Quick Paste Modal / Drawer */}
+              {isQuickPasteOpen && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-60 animate-in fade-in">
+                  <div className="bg-white rounded-3xl max-w-lg w-full p-5 border-4 border-amber-400 shadow-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <ClipboardList className="w-5 h-5 text-amber-700" />
+                        <h3 className="text-sm font-black text-amber-950">
+                          Paste Multiple Links (Max {MAX_BATCH_ITEMS})
+                        </h3>
+                      </div>
+                      <button
+                        onClick={() => setIsQuickPasteOpen(false)}
+                        className="p-1 text-gray-400 hover:text-gray-700 cursor-pointer"
                       >
-                        <div className="w-10 h-10 rounded-full bg-amber-200 flex items-center justify-center text-amber-800">
-                          <Upload className="w-5 h-5" />
-                        </div>
-                        <span className="text-xs font-black text-amber-950">
-                          {selectedFileName ? selectedFileName : 'Click to choose PDF answer sheet'}
-                        </span>
-                        <span className="text-[10px] text-amber-900/60 font-medium">
-                          {selectedFileName ? '✓ PDF file ready to save' : 'File will be saved directly inside browser storage'}
-                        </span>
-                      </label>
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
-                  ) : (
-                    <input
-                      type="text"
-                      value={pdfUrl}
-                      onChange={(e) => setPdfUrl(e.target.value)}
-                      placeholder="https://example.com/worksheet-answers.pdf or Google Drive link"
-                      className="w-full rounded-xl border-2 border-amber-300 px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-                    />
-                  )}
-                </div>
 
-                <div className="pt-2 flex gap-2">
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-500 hover:to-yellow-500 text-amber-950 font-black text-xs rounded-2xl border-2 border-white shadow-md transition-all cursor-pointer active:scale-95"
-                  >
-                    Save & Create Worksheet
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('hub')}
-                    className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-2xl cursor-pointer"
-                  >
-                    Cancel
-                  </button>
+                    <p className="text-xs text-amber-900/70 font-medium">
+                      Paste up to {MAX_BATCH_ITEMS} Google Drive or PDF links below (one link per line). The system will auto-populate rows with sequential QR IDs and titles.
+                    </p>
+
+                    <textarea
+                      value={pastedLinksText}
+                      onChange={(e) => setPastedLinksText(e.target.value)}
+                      placeholder={`https://drive.google.com/file/d/1abc.../view\nhttps://drive.google.com/file/d/2xyz.../view\nhttps://example.com/math-ws3.pdf`}
+                      rows={6}
+                      className="w-full bg-amber-50/40 border-2 border-amber-300 rounded-2xl p-3 text-xs font-mono text-amber-950 focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder-amber-900/30"
+                      autoFocus
+                    />
+
+                    <div className="flex items-center justify-end space-x-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickPasteOpen(false)}
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleProcessPastedLinks}
+                        className="px-5 py-2 bg-amber-400 hover:bg-amber-500 text-amber-950 font-black text-xs rounded-xl border border-white shadow-sm cursor-pointer active:scale-95"
+                      >
+                        Load Into Rows
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </form>
+              )}
             </div>
           ) : activeTab === 'directory' ? (
             /* ========================================================== */
@@ -723,7 +1303,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     className="px-3 py-2 bg-amber-400 hover:bg-amber-500 text-amber-950 font-black text-xs rounded-xl border border-white flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer active:scale-95 flex-shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>New Worksheet</span>
+                    <span>Batch Add Worksheets</span>
                   </button>
                 </div>
 
@@ -759,7 +1339,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       className="w-full bg-white border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-amber-950 focus:outline-none cursor-pointer"
                     >
                       <option value="ALL">All Subjects</option>
-                      {uniqueSubjects.map((sub) => (
+                      {COMMON_SUBJECTS.map((sub) => (
                         <option key={sub} value={sub}>
                           {sub}
                         </option>
@@ -813,13 +1393,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <div className="p-8 bg-amber-50 rounded-2xl border-2 border-dashed border-amber-300 text-center text-amber-950 text-xs font-semibold">
                     <p className="font-bold text-sm mb-1">No worksheets found</p>
                     <p className="text-amber-900/60 mb-3">
-                      Try searching with another QR code ID, title, or create a new worksheet.
+                      Try searching with another QR code ID, title, or create new worksheets in batch.
                     </p>
                     <button
                       onClick={() => setActiveTab('create')}
                       className="px-4 py-2 bg-amber-400 hover:bg-amber-500 text-amber-950 font-black text-xs rounded-xl cursor-pointer"
                     >
-                      + Create Worksheet Now
+                      + Batch Add Worksheets
                     </button>
                   </div>
                 ) : (
@@ -856,7 +1436,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       {/* Action buttons & Inline Safe Delete confirmation */}
                       <div className="flex items-center space-x-1.5 flex-shrink-0">
                         {itemToDelete === ws.id ? (
-                          /* Inline Safe Confirmation State (100% reliable in iframes) */
                           <div className="flex items-center space-x-1 bg-red-50 p-1 rounded-xl border border-red-200 animate-in fade-in">
                             <span className="text-[10px] font-black text-red-700 px-1">Delete?</span>
                             <button
@@ -900,40 +1479,46 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
           ) : (
             /* ========================================================== */
-            /*  VIEW 3: SETTINGS & BACKUP HUB                             */
+            /*  VIEW 3: SETTINGS & BACKUP (MASCOT LOGO & DATA SYNC)       */
             /* ========================================================== */
             <div className="space-y-4 py-1">
-              {/* Custom Mascot / Logo Branding */}
-              <div className="bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 space-y-2.5">
-                <h3 className="text-xs font-black text-amber-950 uppercase tracking-wider flex items-center space-x-1.5">
-                  <span>🐝</span>
-                  <span>School Mascot / Login Logo Branding</span>
-                </h3>
+              {/* Logo Customizer */}
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-300 space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
+                  <div>
+                    <h4 className="text-xs font-black text-amber-950 uppercase tracking-wide">
+                      School / Brand Logo
+                    </h4>
+                    <p className="text-[11px] text-amber-900/60">
+                      Customize the round badge shown on the front screen.
+                    </p>
+                  </div>
+                  {logoPreview && (
+                    <button
+                      onClick={handleRemoveLogo}
+                      className="text-[11px] text-red-600 hover:text-red-800 font-bold underline cursor-pointer"
+                    >
+                      Restore Default Little Bee
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="w-16 h-16 rounded-2xl bg-white border-2 border-amber-300 p-1 flex items-center justify-center shadow-inner overflow-hidden flex-shrink-0">
                     {logoPreview ? (
                       <img
                         src={logoPreview}
-                        alt="Custom Logo"
-                        className="w-12 h-12 object-contain rounded-2xl bg-white border-2 border-amber-300 p-1 shadow-sm"
+                        alt="Logo Preview"
+                        className="w-full h-full object-contain"
                       />
                     ) : (
-                      <div className="w-12 h-12 rounded-2xl bg-amber-300 flex items-center justify-center text-2xl shadow-sm">
-                        🐝
-                      </div>
+                      <span className="text-3xl">🐝</span>
                     )}
-                    <div>
-                      <p className="text-xs font-black text-amber-950">
-                        {logoPreview ? 'Custom School Logo Active' : 'Default Little Bee Mascot'}
-                      </p>
-                      <p className="text-[10px] text-amber-900/60 font-medium">
-                        Shown at the centre of the login greeting page
-                      </p>
-                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <label className="px-3 py-2 bg-white hover:bg-amber-100 text-amber-950 text-xs font-bold rounded-xl border border-amber-300 cursor-pointer shadow-sm active:scale-95 transition-all">
-                      Upload Logo
+                  <div className="flex-1">
+                    <label className="inline-flex items-center space-x-2 px-3 py-2 bg-white hover:bg-amber-100 text-amber-950 rounded-xl border border-amber-300 font-bold text-xs cursor-pointer shadow-sm transition-colors">
+                      <Upload className="w-4 h-4 text-amber-700" />
+                      <span>Upload School Logo</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -941,48 +1526,40 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         className="hidden"
                       />
                     </label>
-                    {logoPreview && (
-                      <button
-                        onClick={handleRemoveLogo}
-                        className="px-2.5 py-2 text-xs text-red-600 hover:bg-red-50 rounded-xl cursor-pointer font-bold"
-                      >
-                        Reset
-                      </button>
-                    )}
+                    <p className="text-[10px] text-amber-900/50 mt-1">
+                      PNG, JPG or SVG formats supported.
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Multi-Device JSON Backup & Sync */}
-              <div className="bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-black text-amber-950 uppercase tracking-wider flex items-center space-x-1.5">
-                      <Download className="w-4 h-4 text-amber-700" />
-                      <span>Multi-Device Backup & Sync</span>
-                    </h3>
-                    <p className="text-[10px] text-amber-900/70 font-medium mt-0.5">
-                      Transfer all worksheets between teacher tablets, iPads & laptops
-                    </p>
-                  </div>
+              {/* Data Backup & Cloud Export */}
+              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-300 space-y-3">
+                <div>
+                  <h4 className="text-xs font-black text-amber-950 uppercase tracking-wide">
+                    Worksheets Database Backup
+                  </h4>
+                  <p className="text-[11px] text-amber-900/60">
+                    Export or import full worksheet dataset to share across teachers or migrate.
+                  </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={handleExportData}
-                    className="flex-1 py-2.5 px-4 bg-white hover:bg-amber-100 active:scale-95 text-amber-950 text-xs font-black rounded-xl border border-amber-300 flex items-center justify-center space-x-2 shadow-sm cursor-pointer transition-all"
+                    className="py-2.5 px-3 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition-colors cursor-pointer"
                   >
-                    <Download className="w-4 h-4" />
-                    <span>Export JSON Backup</span>
+                    <Download className="w-4 h-4 text-amber-700" />
+                    <span>Export Backup (JSON)</span>
                   </button>
 
-                  <label className="flex-1 py-2.5 px-4 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-500 hover:to-yellow-500 active:scale-95 text-amber-950 text-xs font-black rounded-xl border-2 border-white flex items-center justify-center space-x-2 shadow-sm cursor-pointer transition-all">
-                    <Upload className="w-4 h-4" />
-                    <span>Import JSON Backup</span>
+                  <label className="py-2.5 px-3 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center justify-center space-x-2 shadow-sm transition-colors cursor-pointer text-center">
+                    <Upload className="w-4 h-4 text-amber-700" />
+                    <span>Import Backup (JSON)</span>
                     <input
                       type="file"
-                      accept="application/json"
+                      accept=".json,application/json"
                       onChange={handleImportData}
                       className="hidden"
                     />
@@ -990,57 +1567,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               </div>
 
-              {/* Storage Reset Sample Helper */}
-              <div className="bg-amber-50 p-4 rounded-2xl border-2 border-amber-200 flex items-center justify-between">
+              {/* Reset to Default */}
+              <div className="p-3 bg-red-50/50 rounded-2xl border border-red-200 flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-black text-amber-950">Restore Sample Worksheets</h3>
-                  <p className="text-[10px] text-amber-900/60 font-medium">
-                    Load initial sample English, Math & Science worksheet answer keys
+                  <h5 className="text-xs font-bold text-red-950">Reset Sample Data</h5>
+                  <p className="text-[10px] text-red-900/60">
+                    Replaces current database with default 3 sample worksheets.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleResetDefaults}
-                  className="px-3 py-2 bg-white hover:bg-amber-200 text-amber-950 text-xs font-bold rounded-xl border border-amber-300 cursor-pointer shadow-sm flex items-center space-x-1"
+                  className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 rounded-xl text-xs font-bold cursor-pointer transition-colors"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Restore</span>
+                  Reset Defaults
                 </button>
-              </div>
-
-              {/* Classroom & Drive Help */}
-              <div className="bg-white p-3.5 rounded-2xl border-2 border-amber-300">
-                <button
-                  type="button"
-                  onClick={() => setShowTips(!showTips)}
-                  className="w-full flex items-center justify-between text-left cursor-pointer"
-                >
-                  <div className="flex items-center space-x-2">
-                    <ShieldAlert className="w-4 h-4 text-amber-600" />
-                    <span className="text-xs font-black text-amber-950">
-                      Best Practice for School Classroom Devices
-                    </span>
-                  </div>
-                  <span className="text-xs font-bold text-amber-600">
-                    {showTips ? '▲ Hide' : '▼ View'}
-                  </span>
-                </button>
-
-                {showTips && (
-                  <div className="mt-2.5 pt-2.5 border-t border-amber-200 text-[11px] text-amber-950 space-y-2">
-                    <p className="font-medium leading-relaxed">
-                      To ensure student & teacher tablets open answer sheets without login blocks:
-                    </p>
-                    <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200">
-                      <p className="font-black text-amber-900 mb-0.5">
-                        ✅ Direct PDF Upload (Recommended)
-                      </p>
-                      <p className="text-[10px] text-amber-900/80">
-                        In Card 1, select <strong>"📁 Upload PDF File"</strong>. The PDF data is saved directly in browser IndexedDB with zero external login prompts!
-                      </p>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}
