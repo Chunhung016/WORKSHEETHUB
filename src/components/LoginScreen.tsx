@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles } from 'lucide-react';
-import { requestFullScreenMode } from '../utils/fullscreen';
 
 interface LoginScreenProps {
   onEnter: () => void;
@@ -17,11 +16,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnter, onOpenAdmin }
       setCustomLogo(savedLogo);
     }
   }, []);
-
-  const handleEnterWithFullscreen = () => {
-    requestFullScreenMode();
-    onEnter();
-  };
 
   // Secret keyboard listener for 'G' key to open admin
   useEffect(() => {
@@ -192,7 +186,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnter, onOpenAdmin }
           className="w-full px-4 max-w-xs"
         >
           <motion.button
-            onClick={handleEnterWithFullscreen}
+            onClick={onEnter}
             whileHover={{ scale: 1.08, y: -2 }}
             whileTap={{ scale: 0.94, y: 3 }}
             className="w-full relative group py-5 px-10 rounded-full bg-gradient-to-b from-amber-400 via-yellow-400 to-amber-500 text-amber-950 font-black text-2xl md:text-3xl tracking-wide shadow-[0_10px_25px_rgba(217,119,6,0.5)] border-4 border-white cursor-pointer active:shadow-[0_4px_12px_rgba(217,119,6,0.4)] transition-all overflow-hidden flex items-center justify-center space-x-3"

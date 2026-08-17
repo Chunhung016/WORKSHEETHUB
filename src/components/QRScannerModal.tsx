@@ -3,7 +3,6 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { X, CheckCircle2, ArrowRight, RefreshCw, BookOpen, GraduationCap, Sparkles } from 'lucide-react';
 import { WorksheetItem } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { requestFullScreenMode } from '../utils/fullscreen';
 
 interface QRScannerModalProps {
   worksheets: WorksheetItem[];
@@ -205,7 +204,6 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    requestFullScreenMode();
                     onSelectWorksheet(matchedWorksheet);
                   }}
                   className="flex-2 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-500 hover:to-yellow-500 active:scale-95 text-amber-950 font-black text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer border-2 border-white shadow-lg"

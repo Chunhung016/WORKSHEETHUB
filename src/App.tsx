@@ -5,7 +5,6 @@ import { PresenterPlayer } from './components/PresenterPlayer';
 import { AdminModal } from './components/AdminModal';
 import { WorksheetItem } from './types';
 import { getWorksheetsFromStorage, saveWorksheetsToStorage, subscribeToWorksheets, INITIAL_WORKSHEETS } from './data/worksheets';
-import { requestFullScreenMode } from './utils/fullscreen';
 
 export default function App() {
   const [worksheets, setWorksheets] = useState<WorksheetItem[]>(INITIAL_WORKSHEETS);
@@ -28,18 +27,8 @@ export default function App() {
       }
     });
 
-    // Enforce fullscreen on first user touch/click anywhere in the system
-    const handleFirstInteraction = () => {
-      requestFullScreenMode();
-    };
-
-    window.addEventListener('click', handleFirstInteraction, { passive: true });
-    window.addEventListener('touchstart', handleFirstInteraction, { passive: true });
-
     return () => {
       unsubscribeCloud();
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
     };
   }, []);
 
@@ -49,12 +38,10 @@ export default function App() {
   };
 
   const handleEnterClick = () => {
-    requestFullScreenMode();
     setIsScannerOpen(true);
   };
 
   const handleSelectWorksheet = (ws: WorksheetItem) => {
-    requestFullScreenMode();
     setActiveWorksheet(ws);
     setIsScannerOpen(false);
   };

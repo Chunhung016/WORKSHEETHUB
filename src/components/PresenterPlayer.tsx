@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { WorksheetItem } from '../types';
 import { SecurePdfViewer } from './SecurePdfViewer';
-import { requestFullScreenMode } from '../utils/fullscreen';
 
 interface PresenterPlayerProps {
   worksheet: WorksheetItem;
@@ -15,8 +14,6 @@ export const PresenterPlayer: React.FC<PresenterPlayerProps> = ({
   onExit,
 }) => {
   useEffect(() => {
-    requestFullScreenMode();
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onExit();
