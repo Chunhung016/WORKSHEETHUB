@@ -66,6 +66,8 @@ const COMMON_SUBJECTS = [
   'General',
 ];
 
+const DEFAULT_LOGO_URL = 'https://i.postimg.cc/DzrFcSt2/ezgif-frame-287.jpg';
+
 const MAX_BATCH_ITEMS = 10;
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -138,8 +140,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
   // Settings states (Card 3: Settings)
-  const [logoPreview, setLogoPreview] = useState<string | null>(
-    localStorage.getItem('little_bee_custom_logo')
+  const [logoPreview, setLogoPreview] = useState<string>(
+    localStorage.getItem('little_bee_custom_logo') || DEFAULT_LOGO_URL
   );
 
   const showNotification = (text: string, type: 'success' | 'error' = 'success') => {
@@ -487,7 +489,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleRemoveLogo = () => {
-    setLogoPreview(null);
+    setLogoPreview(DEFAULT_LOGO_URL);
     localStorage.removeItem('little_bee_custom_logo');
     showNotification('Logo restored to default Little Bee mascot.');
   };
@@ -534,8 +536,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <span className="hidden sm:inline">Hub</span>
               </button>
             )}
-            <div className="w-8 h-8 rounded-xl bg-amber-400 flex items-center justify-center text-lg shadow-sm border border-white">
-              🐝
+            <div className="w-8 h-8 rounded-xl bg-amber-400 flex items-center justify-center text-lg shadow-sm border border-white overflow-hidden p-0.5">
+              <img
+                src={logoPreview || DEFAULT_LOGO_URL}
+                alt="Logo"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover rounded-lg"
+              />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-amber-950 flex items-center gap-1.5 leading-tight">
@@ -591,8 +598,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           {!isAuthenticated ? (
             /* Passcode Verification Screen */
             <div className="flex flex-col items-center text-center py-10">
-              <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center text-4xl mb-3 border-2 border-amber-300 shadow-inner">
-                🐝
+              <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center mb-3 border-2 border-amber-300 shadow-inner overflow-hidden p-1">
+                <img
+                  src={logoPreview || DEFAULT_LOGO_URL}
+                  alt="Little Bee Mascot"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover rounded-2xl"
+                />
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-amber-950 mb-1">
                 Admin Passcode
@@ -1505,15 +1517,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                 <div className="flex items-center space-x-4">
                   <div className="w-16 h-16 rounded-2xl bg-white border-2 border-amber-300 p-1 flex items-center justify-center shadow-inner overflow-hidden flex-shrink-0">
-                    {logoPreview ? (
-                      <img
-                        src={logoPreview}
-                        alt="Logo Preview"
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <span className="text-3xl">🐝</span>
-                    )}
+                    <img
+                      src={logoPreview || DEFAULT_LOGO_URL}
+                      alt="Logo Preview"
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover rounded-xl"
+                    />
                   </div>
                   <div className="flex-1">
                     <label className="inline-flex items-center space-x-2 px-3 py-2 bg-white hover:bg-amber-100 text-amber-950 rounded-xl border border-amber-300 font-bold text-xs cursor-pointer shadow-sm transition-colors">

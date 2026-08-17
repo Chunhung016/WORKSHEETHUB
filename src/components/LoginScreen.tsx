@@ -7,8 +7,10 @@ interface LoginScreenProps {
   onOpenAdmin: () => void;
 }
 
+const DEFAULT_LOGO_URL = 'https://i.postimg.cc/DzrFcSt2/ezgif-frame-287.jpg';
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnter, onOpenAdmin }) => {
-  const [customLogo, setCustomLogo] = useState<string | null>(null);
+  const [customLogo, setCustomLogo] = useState<string>(DEFAULT_LOGO_URL);
 
   useEffect(() => {
     const savedLogo = localStorage.getItem('little_bee_custom_logo');
@@ -151,8 +153,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnter, onOpenAdmin }
                 {customLogo ? (
                   <img
                     src={customLogo}
-                    alt="Logo"
-                    className="w-full h-full object-contain filter drop-shadow"
+                    alt="Little Bee Logo"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover rounded-[24px] filter drop-shadow-sm"
                   />
                 ) : (
                   <div className="flex items-center justify-center">
